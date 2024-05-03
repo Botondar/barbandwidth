@@ -139,6 +139,7 @@ static test_config Tests[] =
     { "Bar 32MiB  [32x4]", &Write32x4, MiB(32),    MemoryType_BAR },
     { "Bar 64MiB  [32x4]", &Write32x4, MiB(64),    MemoryType_BAR },
 
+#if 0
     { "Mem 4KiB   [32x2]", &Write32x2, KiB(4),     MemoryType_Host },
     { "Mem 8KiB   [32x2]", &Write32x2, KiB(8),     MemoryType_Host },
     { "Mem 16KiB  [32x2]", &Write32x2, KiB(16),    MemoryType_Host },
@@ -200,6 +201,7 @@ static test_config Tests[] =
     { "Bar 16MiB  [32x1]", &Write32x1, MiB(16),    MemoryType_BAR },
     { "Bar 32MiB  [32x1]", &Write32x1, MiB(32),    MemoryType_BAR },
     { "Bar 64MiB  [32x1]", &Write32x1, MiB(64),    MemoryType_BAR },
+#endif
 };
 
 static test_context Initialize(void);
@@ -221,7 +223,8 @@ int main(void)
     {
         printf("Device: %s\n", Context.DeviceName);
         printf("Frequency estimate: %f Ghz\n", Context.TSCFrequencyEstimate / (1000.0 * 1000.0 * 1000.0));
-        for (;;)
+
+        //for (;;)
         {
             for (u32 TestIndex = 0; TestIndex < CountOf(Tests); TestIndex++)
             {
