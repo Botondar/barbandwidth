@@ -20,7 +20,7 @@ typedef u32 flags32;
 typedef u32 b32;
 
 #define CountOf(a) (sizeof(a) / sizeof(*(a)))
-#define Assert(expr) if (!expr) __debugbreak();
+#define Assert(expr) if (!expr) __debugbreak()
 
 #define KiB(x) ((umm)(x) << 10)
 #define MiB(x) ((umm)(x) << 20)
@@ -39,7 +39,13 @@ typedef enum memory_type
     MemoryType_Count,
 } memory_type;
 
-typedef void test_function(umm Count, void* Dst);
+typedef enum test_type
+{
+    TestType_Write = 0,
+    TestType_Copy,
+} test_type;
+
+typedef void test_function(umm Count, void* Dst, void* Src);
 
 typedef struct test_context
 {
@@ -54,7 +60,8 @@ typedef struct test_config
     const char*     Name;
     test_function*  Function;
     umm             Count;
-    memory_type     Type;
+    memory_type     MemoryType;
+    test_type       TestType;
 } test_config;
 
 typedef struct test_result
@@ -67,18 +74,32 @@ typedef struct test_result
 
 static test_result RunTest(test_context* Context, test_config* Test)
 {
+    Assert(Context->BufferSize >= Test->Count);
+
     test_result Result = {0};
     Result.DataProcessed = Test->Count;
     Result.Min = ~(0llu);
 
-    Assert(Context->BufferSize >= Test->Count);
-    void* Buffer = Context->Buffers[Test->Type];
+    void* Dst = 0;
+    void* Src = 0;
+    switch (Test->TestType)
+    {
+        case TestType_Write:
+        {
+            Dst = Context->Buffers[Test->MemoryType];
+        } break;
+        case TestType_Copy:
+        {
+            Dst = Context->Buffers[MemoryType_BAR];
+            Src = Context->Buffers[MemoryType_Host];
+        } break;
+    }
 
     const u32 RepCount = 4096;
     for (u32 Rep = 0; Rep < RepCount; Rep++)
     {
         u64 Begin = __rdtsc();
-        Test->Function(Test->Count, Buffer);
+        Test->Function(Test->Count, Dst, Src);
         u64 End = __rdtsc();
         u64 Delta = End - Begin;
 
@@ -102,105 +123,185 @@ static test_result RunTest(test_context* Context, test_config* Test)
 //
 #include <stdio.h>
 
-void Write32x1(umm Count, void* Dst);
-void Write32x2(umm Count, void* Dst);
-void Write32x4(umm Count, void* Dst);
+void Write32x1              (umm Count, void* Dst, void* Src);
+void Write32x2              (umm Count, void* Dst, void* Src);
+void Write32x4              (umm Count, void* Dst, void* Src);
+void WriteNonTemporal32x4   (umm Count, void* Dst, void* Src);
+void Copy32x4               (umm Count, void* Dst, void* Src);
+void CopyNonTemporal32x4    (umm Count, void* Dst, void* Src);
+
+#define TestCopyTemporal        1
+#define TestCopyNonTemporal     1
+#define TestWriteNonTemporal    0
+#define TestWriteTemporal       0
 
 static test_config Tests[] = 
 {
-    { "Mem 4KiB   [32x4]", &Write32x4, KiB(4),     MemoryType_Host },
-    { "Mem 8KiB   [32x4]", &Write32x4, KiB(8),     MemoryType_Host },
-    { "Mem 16KiB  [32x4]", &Write32x4, KiB(16),    MemoryType_Host },
-    { "Mem 32KiB  [32x4]", &Write32x4, KiB(32),    MemoryType_Host },
-    { "Mem 64KiB  [32x4]", &Write32x4, KiB(64),    MemoryType_Host },
-    { "Mem 128KiB [32x4]", &Write32x4, KiB(128),   MemoryType_Host },
-    { "Mem 256KiB [32x4]", &Write32x4, KiB(256),   MemoryType_Host },
-    { "Mem 512KiB [32x4]", &Write32x4, KiB(512),   MemoryType_Host },
-    { "Mem 1MiB   [32x4]", &Write32x4, MiB(1),     MemoryType_Host },
-    { "Mem 2MiB   [32x4]", &Write32x4, MiB(2),     MemoryType_Host },
-    { "Mem 4MiB   [32x4]", &Write32x4, MiB(4),     MemoryType_Host },
-    { "Mem 8MiB   [32x4]", &Write32x4, MiB(8),     MemoryType_Host },
-    { "Mem 16MiB  [32x4]", &Write32x4, MiB(16),    MemoryType_Host },
-    { "Mem 32MiB  [32x4]", &Write32x4, MiB(32),    MemoryType_Host },
-    { "Mem 64MiB  [32x4]", &Write32x4, MiB(64),    MemoryType_Host },
-    { "Bar 4KiB   [32x4]", &Write32x4, KiB(4),     MemoryType_BAR },
-    { "Bar 8KiB   [32x4]", &Write32x4, KiB(8),     MemoryType_BAR },
-    { "Bar 16KiB  [32x4]", &Write32x4, KiB(16),    MemoryType_BAR },
-    { "Bar 32KiB  [32x4]", &Write32x4, KiB(32),    MemoryType_BAR },
-    { "Bar 64KiB  [32x4]", &Write32x4, KiB(64),    MemoryType_BAR },
-    { "Bar 128KiB [32x4]", &Write32x4, KiB(128),   MemoryType_BAR },
-    { "Bar 256KiB [32x4]", &Write32x4, KiB(256),   MemoryType_BAR },
-    { "Bar 512KiB [32x4]", &Write32x4, KiB(512),   MemoryType_BAR },
-    { "Bar 1MiB   [32x4]", &Write32x4, MiB(1),     MemoryType_BAR },
-    { "Bar 2MiB   [32x4]", &Write32x4, MiB(2),     MemoryType_BAR },
-    { "Bar 4MiB   [32x4]", &Write32x4, MiB(4),     MemoryType_BAR },
-    { "Bar 8MiB   [32x4]", &Write32x4, MiB(8),     MemoryType_BAR },
-    { "Bar 16MiB  [32x4]", &Write32x4, MiB(16),    MemoryType_BAR },
-    { "Bar 32MiB  [32x4]", &Write32x4, MiB(32),    MemoryType_BAR },
-    { "Bar 64MiB  [32x4]", &Write32x4, MiB(64),    MemoryType_BAR },
+#if TestCopyNonTemporal
+    { "Copy Non-Temporal 4KiB   [32x4]", &CopyNonTemporal32x4, KiB(4),     MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 8KiB   [32x4]", &CopyNonTemporal32x4, KiB(8),     MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 16KiB  [32x4]", &CopyNonTemporal32x4, KiB(16),    MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 32KiB  [32x4]", &CopyNonTemporal32x4, KiB(32),    MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 64KiB  [32x4]", &CopyNonTemporal32x4, KiB(64),    MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 128KiB [32x4]", &CopyNonTemporal32x4, KiB(128),   MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 256KiB [32x4]", &CopyNonTemporal32x4, KiB(256),   MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 512KiB [32x4]", &CopyNonTemporal32x4, KiB(512),   MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 1MiB   [32x4]", &CopyNonTemporal32x4, MiB(1),     MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 2MiB   [32x4]", &CopyNonTemporal32x4, MiB(2),     MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 4MiB   [32x4]", &CopyNonTemporal32x4, MiB(4),     MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 8MiB   [32x4]", &CopyNonTemporal32x4, MiB(8),     MemoryType_BAR, TestType_Copy },
+    { "Copy Non-Temporal 16MiB  [32x4]", &CopyNonTemporal32x4, MiB(16),    MemoryType_BAR, TestType_Copy },
+    //{ "Copy Non-Temporal 32MiB  [32x4]", &CopyNonTemporal32x4, MiB(32),    MemoryType_BAR, TestType_Copy },
+    //{ "Copy Non-Temporal 64MiB  [32x4]", &CopyNonTemporal32x4, MiB(64),    MemoryType_BAR, TestType_Copy },
+#endif
 
+#if TestCopyTemporal
+    { "Copy Temporal 4KiB   [32x4]", &Copy32x4, KiB(4),     MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 8KiB   [32x4]", &Copy32x4, KiB(8),     MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 16KiB  [32x4]", &Copy32x4, KiB(16),    MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 32KiB  [32x4]", &Copy32x4, KiB(32),    MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 64KiB  [32x4]", &Copy32x4, KiB(64),    MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 128KiB [32x4]", &Copy32x4, KiB(128),   MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 256KiB [32x4]", &Copy32x4, KiB(256),   MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 512KiB [32x4]", &Copy32x4, KiB(512),   MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 1MiB   [32x4]", &Copy32x4, MiB(1),     MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 2MiB   [32x4]", &Copy32x4, MiB(2),     MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 4MiB   [32x4]", &Copy32x4, MiB(4),     MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 8MiB   [32x4]", &Copy32x4, MiB(8),     MemoryType_BAR, TestType_Copy },
+    { "Copy Temporal 16MiB  [32x4]", &Copy32x4, MiB(16),    MemoryType_BAR, TestType_Copy },
+    //{ "Copy Temporal 32MiB  [32x4]", &Copy32x4, MiB(32),    MemoryType_BAR, TestType_Copy },
+    //{ "Copy Temporal 64MiB  [32x4]", &Copy32x4, MiB(64),    MemoryType_BAR, TestType_Copy },
+#endif
+
+#if TestWriteNonTemporal
+    { "Mem NonTemporal 4KiB   [32x4]", &WriteNonTemporal32x4, KiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 8KiB   [32x4]", &WriteNonTemporal32x4, KiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 16KiB  [32x4]", &WriteNonTemporal32x4, KiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 32KiB  [32x4]", &WriteNonTemporal32x4, KiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 64KiB  [32x4]", &WriteNonTemporal32x4, KiB(64),    MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 128KiB [32x4]", &WriteNonTemporal32x4, KiB(128),   MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 256KiB [32x4]", &WriteNonTemporal32x4, KiB(256),   MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 512KiB [32x4]", &WriteNonTemporal32x4, KiB(512),   MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 1MiB   [32x4]", &WriteNonTemporal32x4, MiB(1),     MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 2MiB   [32x4]", &WriteNonTemporal32x4, MiB(2),     MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 4MiB   [32x4]", &WriteNonTemporal32x4, MiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 8MiB   [32x4]", &WriteNonTemporal32x4, MiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 16MiB  [32x4]", &WriteNonTemporal32x4, MiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 32MiB  [32x4]", &WriteNonTemporal32x4, MiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem NonTemporal 64MiB  [32x4]", &WriteNonTemporal32x4, MiB(64),    MemoryType_Host, TestType_Write },
+    { "Bar NonTemporal 4KiB   [32x4]", &WriteNonTemporal32x4, KiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 8KiB   [32x4]", &WriteNonTemporal32x4, KiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 16KiB  [32x4]", &WriteNonTemporal32x4, KiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 32KiB  [32x4]", &WriteNonTemporal32x4, KiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 64KiB  [32x4]", &WriteNonTemporal32x4, KiB(64),    MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 128KiB [32x4]", &WriteNonTemporal32x4, KiB(128),   MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 256KiB [32x4]", &WriteNonTemporal32x4, KiB(256),   MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 512KiB [32x4]", &WriteNonTemporal32x4, KiB(512),   MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 1MiB   [32x4]", &WriteNonTemporal32x4, MiB(1),     MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 2MiB   [32x4]", &WriteNonTemporal32x4, MiB(2),     MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 4MiB   [32x4]", &WriteNonTemporal32x4, MiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 8MiB   [32x4]", &WriteNonTemporal32x4, MiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 16MiB  [32x4]", &WriteNonTemporal32x4, MiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 32MiB  [32x4]", &WriteNonTemporal32x4, MiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar NonTemporal 64MiB  [32x4]", &WriteNonTemporal32x4, MiB(64),    MemoryType_BAR, TestType_Write },
+#endif
+
+#if TestWriteTemporal
+    { "Mem 4KiB   [32x4]", &Write32x4, KiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem 8KiB   [32x4]", &Write32x4, KiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem 16KiB  [32x4]", &Write32x4, KiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem 32KiB  [32x4]", &Write32x4, KiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem 64KiB  [32x4]", &Write32x4, KiB(64),    MemoryType_Host, TestType_Write },
+    { "Mem 128KiB [32x4]", &Write32x4, KiB(128),   MemoryType_Host, TestType_Write },
+    { "Mem 256KiB [32x4]", &Write32x4, KiB(256),   MemoryType_Host, TestType_Write },
+    { "Mem 512KiB [32x4]", &Write32x4, KiB(512),   MemoryType_Host, TestType_Write },
+    { "Mem 1MiB   [32x4]", &Write32x4, MiB(1),     MemoryType_Host, TestType_Write },
+    { "Mem 2MiB   [32x4]", &Write32x4, MiB(2),     MemoryType_Host, TestType_Write },
+    { "Mem 4MiB   [32x4]", &Write32x4, MiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem 8MiB   [32x4]", &Write32x4, MiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem 16MiB  [32x4]", &Write32x4, MiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem 32MiB  [32x4]", &Write32x4, MiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem 64MiB  [32x4]", &Write32x4, MiB(64),    MemoryType_Host, TestType_Write },
+    { "Bar 4KiB   [32x4]", &Write32x4, KiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar 8KiB   [32x4]", &Write32x4, KiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar 16KiB  [32x4]", &Write32x4, KiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar 32KiB  [32x4]", &Write32x4, KiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar 64KiB  [32x4]", &Write32x4, KiB(64),    MemoryType_BAR, TestType_Write },
+    { "Bar 128KiB [32x4]", &Write32x4, KiB(128),   MemoryType_BAR, TestType_Write },
+    { "Bar 256KiB [32x4]", &Write32x4, KiB(256),   MemoryType_BAR, TestType_Write },
+    { "Bar 512KiB [32x4]", &Write32x4, KiB(512),   MemoryType_BAR, TestType_Write },
+    { "Bar 1MiB   [32x4]", &Write32x4, MiB(1),     MemoryType_BAR, TestType_Write },
+    { "Bar 2MiB   [32x4]", &Write32x4, MiB(2),     MemoryType_BAR, TestType_Write },
+    { "Bar 4MiB   [32x4]", &Write32x4, MiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar 8MiB   [32x4]", &Write32x4, MiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar 16MiB  [32x4]", &Write32x4, MiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar 32MiB  [32x4]", &Write32x4, MiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar 64MiB  [32x4]", &Write32x4, MiB(64),    MemoryType_BAR, TestType_Write },
+#endif
+
+    // Unused
 #if 0
-    { "Mem 4KiB   [32x2]", &Write32x2, KiB(4),     MemoryType_Host },
-    { "Mem 8KiB   [32x2]", &Write32x2, KiB(8),     MemoryType_Host },
-    { "Mem 16KiB  [32x2]", &Write32x2, KiB(16),    MemoryType_Host },
-    { "Mem 32KiB  [32x2]", &Write32x2, KiB(32),    MemoryType_Host },
-    { "Mem 64KiB  [32x2]", &Write32x2, KiB(64),    MemoryType_Host },
-    { "Mem 128KiB [32x2]", &Write32x2, KiB(128),   MemoryType_Host },
-    { "Mem 256KiB [32x2]", &Write32x2, KiB(256),   MemoryType_Host },
-    { "Mem 512KiB [32x2]", &Write32x2, KiB(512),   MemoryType_Host },
-    { "Mem 1MiB   [32x2]", &Write32x2, MiB(1),     MemoryType_Host },
-    { "Mem 2MiB   [32x2]", &Write32x2, MiB(2),     MemoryType_Host },
-    { "Mem 4MiB   [32x2]", &Write32x2, MiB(4),     MemoryType_Host },
-    { "Mem 8MiB   [32x2]", &Write32x2, MiB(8),     MemoryType_Host },
-    { "Mem 16MiB  [32x2]", &Write32x2, MiB(16),    MemoryType_Host },
-    { "Mem 32MiB  [32x2]", &Write32x2, MiB(32),    MemoryType_Host },
-    { "Mem 64MiB  [32x2]", &Write32x2, MiB(64),    MemoryType_Host },
-    { "Bar 4KiB   [32x2]", &Write32x2, KiB(4),     MemoryType_BAR },
-    { "Bar 8KiB   [32x2]", &Write32x2, KiB(8),     MemoryType_BAR },
-    { "Bar 16KiB  [32x2]", &Write32x2, KiB(16),    MemoryType_BAR },
-    { "Bar 32KiB  [32x2]", &Write32x2, KiB(32),    MemoryType_BAR },
-    { "Bar 64KiB  [32x2]", &Write32x2, KiB(64),    MemoryType_BAR },
-    { "Bar 128KiB [32x2]", &Write32x2, KiB(128),   MemoryType_BAR },
-    { "Bar 256KiB [32x2]", &Write32x2, KiB(256),   MemoryType_BAR },
-    { "Bar 512KiB [32x2]", &Write32x2, KiB(512),   MemoryType_BAR },
-    { "Bar 1MiB   [32x2]", &Write32x2, MiB(1),     MemoryType_BAR },
-    { "Bar 2MiB   [32x2]", &Write32x2, MiB(2),     MemoryType_BAR },
-    { "Bar 4MiB   [32x2]", &Write32x2, MiB(4),     MemoryType_BAR },
-    { "Bar 8MiB   [32x2]", &Write32x2, MiB(8),     MemoryType_BAR },
-    { "Bar 16MiB  [32x2]", &Write32x2, MiB(16),    MemoryType_BAR },
-    { "Bar 32MiB  [32x2]", &Write32x2, MiB(32),    MemoryType_BAR },
-    { "Bar 64MiB  [32x2]", &Write32x2, MiB(64),    MemoryType_BAR },
+    { "Mem 4KiB   [32x2]", &Write32x2, KiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem 8KiB   [32x2]", &Write32x2, KiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem 16KiB  [32x2]", &Write32x2, KiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem 32KiB  [32x2]", &Write32x2, KiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem 64KiB  [32x2]", &Write32x2, KiB(64),    MemoryType_Host, TestType_Write },
+    { "Mem 128KiB [32x2]", &Write32x2, KiB(128),   MemoryType_Host, TestType_Write },
+    { "Mem 256KiB [32x2]", &Write32x2, KiB(256),   MemoryType_Host, TestType_Write },
+    { "Mem 512KiB [32x2]", &Write32x2, KiB(512),   MemoryType_Host, TestType_Write },
+    { "Mem 1MiB   [32x2]", &Write32x2, MiB(1),     MemoryType_Host, TestType_Write },
+    { "Mem 2MiB   [32x2]", &Write32x2, MiB(2),     MemoryType_Host, TestType_Write },
+    { "Mem 4MiB   [32x2]", &Write32x2, MiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem 8MiB   [32x2]", &Write32x2, MiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem 16MiB  [32x2]", &Write32x2, MiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem 32MiB  [32x2]", &Write32x2, MiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem 64MiB  [32x2]", &Write32x2, MiB(64),    MemoryType_Host, TestType_Write },
+    { "Bar 4KiB   [32x2]", &Write32x2, KiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar 8KiB   [32x2]", &Write32x2, KiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar 16KiB  [32x2]", &Write32x2, KiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar 32KiB  [32x2]", &Write32x2, KiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar 64KiB  [32x2]", &Write32x2, KiB(64),    MemoryType_BAR, TestType_Write },
+    { "Bar 128KiB [32x2]", &Write32x2, KiB(128),   MemoryType_BAR, TestType_Write },
+    { "Bar 256KiB [32x2]", &Write32x2, KiB(256),   MemoryType_BAR, TestType_Write },
+    { "Bar 512KiB [32x2]", &Write32x2, KiB(512),   MemoryType_BAR, TestType_Write },
+    { "Bar 1MiB   [32x2]", &Write32x2, MiB(1),     MemoryType_BAR, TestType_Write },
+    { "Bar 2MiB   [32x2]", &Write32x2, MiB(2),     MemoryType_BAR, TestType_Write },
+    { "Bar 4MiB   [32x2]", &Write32x2, MiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar 8MiB   [32x2]", &Write32x2, MiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar 16MiB  [32x2]", &Write32x2, MiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar 32MiB  [32x2]", &Write32x2, MiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar 64MiB  [32x2]", &Write32x2, MiB(64),    MemoryType_BAR, TestType_Write },
 
-    { "Mem 4KiB   [32x1]", &Write32x1, KiB(4),     MemoryType_Host },
-    { "Mem 8KiB   [32x1]", &Write32x1, KiB(8),     MemoryType_Host },
-    { "Mem 16KiB  [32x1]", &Write32x1, KiB(16),    MemoryType_Host },
-    { "Mem 32KiB  [32x1]", &Write32x1, KiB(32),    MemoryType_Host },
-    { "Mem 64KiB  [32x1]", &Write32x1, KiB(64),    MemoryType_Host },
-    { "Mem 128KiB [32x1]", &Write32x1, KiB(128),   MemoryType_Host },
-    { "Mem 256KiB [32x1]", &Write32x1, KiB(256),   MemoryType_Host },
-    { "Mem 512KiB [32x1]", &Write32x1, KiB(512),   MemoryType_Host },
-    { "Mem 1MiB   [32x1]", &Write32x1, MiB(1),     MemoryType_Host },
-    { "Mem 2MiB   [32x1]", &Write32x1, MiB(2),     MemoryType_Host },
-    { "Mem 4MiB   [32x1]", &Write32x1, MiB(4),     MemoryType_Host },
-    { "Mem 8MiB   [32x1]", &Write32x1, MiB(8),     MemoryType_Host },
-    { "Mem 16MiB  [32x1]", &Write32x1, MiB(16),    MemoryType_Host },
-    { "Mem 32MiB  [32x1]", &Write32x1, MiB(32),    MemoryType_Host },
-    { "Mem 64MiB  [32x1]", &Write32x1, MiB(64),    MemoryType_Host },
-    { "Bar 4KiB   [32x1]", &Write32x1, KiB(4),     MemoryType_BAR },
-    { "Bar 8KiB   [32x1]", &Write32x1, KiB(8),     MemoryType_BAR },
-    { "Bar 16KiB  [32x1]", &Write32x1, KiB(16),    MemoryType_BAR },
-    { "Bar 32KiB  [32x1]", &Write32x1, KiB(32),    MemoryType_BAR },
-    { "Bar 64KiB  [32x1]", &Write32x1, KiB(64),    MemoryType_BAR },
-    { "Bar 128KiB [32x1]", &Write32x1, KiB(128),   MemoryType_BAR },
-    { "Bar 256KiB [32x1]", &Write32x1, KiB(256),   MemoryType_BAR },
-    { "Bar 512KiB [32x1]", &Write32x1, KiB(512),   MemoryType_BAR },
-    { "Bar 1MiB   [32x1]", &Write32x1, MiB(1),     MemoryType_BAR },
-    { "Bar 2MiB   [32x1]", &Write32x1, MiB(2),     MemoryType_BAR },
-    { "Bar 4MiB   [32x1]", &Write32x1, MiB(4),     MemoryType_BAR },
-    { "Bar 8MiB   [32x1]", &Write32x1, MiB(8),     MemoryType_BAR },
-    { "Bar 16MiB  [32x1]", &Write32x1, MiB(16),    MemoryType_BAR },
-    { "Bar 32MiB  [32x1]", &Write32x1, MiB(32),    MemoryType_BAR },
-    { "Bar 64MiB  [32x1]", &Write32x1, MiB(64),    MemoryType_BAR },
+    { "Mem 4KiB   [32x1]", &Write32x1, KiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem 8KiB   [32x1]", &Write32x1, KiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem 16KiB  [32x1]", &Write32x1, KiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem 32KiB  [32x1]", &Write32x1, KiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem 64KiB  [32x1]", &Write32x1, KiB(64),    MemoryType_Host, TestType_Write },
+    { "Mem 128KiB [32x1]", &Write32x1, KiB(128),   MemoryType_Host, TestType_Write },
+    { "Mem 256KiB [32x1]", &Write32x1, KiB(256),   MemoryType_Host, TestType_Write },
+    { "Mem 512KiB [32x1]", &Write32x1, KiB(512),   MemoryType_Host, TestType_Write },
+    { "Mem 1MiB   [32x1]", &Write32x1, MiB(1),     MemoryType_Host, TestType_Write },
+    { "Mem 2MiB   [32x1]", &Write32x1, MiB(2),     MemoryType_Host, TestType_Write },
+    { "Mem 4MiB   [32x1]", &Write32x1, MiB(4),     MemoryType_Host, TestType_Write },
+    { "Mem 8MiB   [32x1]", &Write32x1, MiB(8),     MemoryType_Host, TestType_Write },
+    { "Mem 16MiB  [32x1]", &Write32x1, MiB(16),    MemoryType_Host, TestType_Write },
+    { "Mem 32MiB  [32x1]", &Write32x1, MiB(32),    MemoryType_Host, TestType_Write },
+    { "Mem 64MiB  [32x1]", &Write32x1, MiB(64),    MemoryType_Host, TestType_Write },
+    { "Bar 4KiB   [32x1]", &Write32x1, KiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar 8KiB   [32x1]", &Write32x1, KiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar 16KiB  [32x1]", &Write32x1, KiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar 32KiB  [32x1]", &Write32x1, KiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar 64KiB  [32x1]", &Write32x1, KiB(64),    MemoryType_BAR, TestType_Write },
+    { "Bar 128KiB [32x1]", &Write32x1, KiB(128),   MemoryType_BAR, TestType_Write },
+    { "Bar 256KiB [32x1]", &Write32x1, KiB(256),   MemoryType_BAR, TestType_Write },
+    { "Bar 512KiB [32x1]", &Write32x1, KiB(512),   MemoryType_BAR, TestType_Write },
+    { "Bar 1MiB   [32x1]", &Write32x1, MiB(1),     MemoryType_BAR, TestType_Write },
+    { "Bar 2MiB   [32x1]", &Write32x1, MiB(2),     MemoryType_BAR, TestType_Write },
+    { "Bar 4MiB   [32x1]", &Write32x1, MiB(4),     MemoryType_BAR, TestType_Write },
+    { "Bar 8MiB   [32x1]", &Write32x1, MiB(8),     MemoryType_BAR, TestType_Write },
+    { "Bar 16MiB  [32x1]", &Write32x1, MiB(16),    MemoryType_BAR, TestType_Write },
+    { "Bar 32MiB  [32x1]", &Write32x1, MiB(32),    MemoryType_BAR, TestType_Write },
+    { "Bar 64MiB  [32x1]", &Write32x1, MiB(64),    MemoryType_BAR, TestType_Write },
 #endif
 };
 
