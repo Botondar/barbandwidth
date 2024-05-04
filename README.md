@@ -20,4 +20,4 @@ Entries contain throughput in `avg (min)` format.
 
 I'm not sure how much the average case of the temporal stores is tainted by doing repetition testing: it might be the case that continuously hammering the same memory forces the processor to actually wait for the results to transfer on the PCIe bus (which would explain the average case dropping to the baseline ~8 GiB/s).
 
-Looking at either the min or the avg cases of both tests (depending on which one is better), it seems like doing non-temporal stores for the common constant buffer sizes of 16-64 KiB is a clear winner. This is especially true if the buffer contents have just been prepared separately in a RAM buffer - doing temporal stores might knock out still needed cache lines in that case.
+Looking at either the min or the avg cases of both tests (whichever's better), it seems like doing non-temporal stores for the common constant buffer sizes of 16-64 KiB is a clear winner. This is especially true if the buffer contents have just been prepared separately in a RAM buffer - doing temporal stores might knock out still needed cache lines in that case.
