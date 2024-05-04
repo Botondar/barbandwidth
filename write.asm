@@ -66,7 +66,7 @@ Copy32x4:
     vmovdqu ymm0, [r8 + 96]
     vmovdqu [rdx + 96], ymm0
     add rdx, 128
-    add r9, 128
+    add r8, 128
     sub rcx, 128
     jnz .loop
     ret
@@ -83,7 +83,7 @@ CopyNonTemporal32x4:
     vmovdqu ymm0, [r8 + 96]
     vmovntdq [rdx + 96], ymm0
     add rdx, 128
-    add r9, 128
+    add r8, 128
     sub rcx, 128
     jnz .loop
     ret
